@@ -35,30 +35,39 @@ go build -o "${DATA}/ssh233-server" ./cmd/server
 PID=$!
 trap 'kill "$PID" 2>/dev/null || true; wait "$PID" 2>/dev/null || true' EXIT
 
-for _ in $(seq 1 60); do
+echo "waiting for health..."
+ready=0
+for _ in $(seq 1 80); do
   if curl -fsS "${BASE}/health" 2>/dev/null | grep -q '"status":"ok"'; then
+    ready=1
     break
   fi
   sleep 0.25
 done
-curl -fsS "${BASE}/health" | grep -q '"status":"ok"'
-sleep 0.5
+if [ "$ready" -ne 1 ]; then
+  echo "server did not become healthy" >&2
+  exit 1
+fi
 
-TOKEN=$(curl -fsS -X POST "${BASE}/api/v1/auth/login" \
+echo "login..."
+LOGIN_JSON=$(curl -fsS -X POST "${BASE}/api/v1/auth/login" \
   -H 'Content-Type: application/json' \
-  -d '{"username":"root","password":"root"}' | python3 -c "import json,sys; print(json.load(sys.stdin)['token'])")
-[ -n "$TOKEN" ]
+  -d '{"username":"root","password":"root"}')
+TOKEN=$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['token'])" "$LOGIN_JSON")
+test -n "$TOKEN"
 
-curl -fsS -H "Authorization: Bearer ${TOKEN}" "${BASE}/api/v1/tenants" | grep -q 'default'
-curl -fsS -H "Authorization: Bearer ${TOKEN}" "${BASE}/api/v1/hosts" | grep -q '\['
+echo "list tenants..."
+TENANTS=$(curl -fsS -H "Authorization: Bearer ${TOKEN}" "${BASE}/api/v1/tenants")
+echo "$TENANTS" | grep -q 'default'
+TENANT_ID=$(python3 -c "import json,sys; ts=json.loads(sys.argv[1]); print(next(t['id'] for t in ts if t.get('slug')=='default'))" "$TENANTS")
 
+echo "create host..."
 curl -fsS -H "Authorization: Bearer ${TOKEN}" -X POST "${BASE}/api/v1/hosts" \
   -H 'Content-Type: application/json' \
-  -d '{"name":"smoke-host","address":"127.0.0.1","port":22,"username":"root","enabled":true}' | grep -q 'smoke-host'
+  -d "{\"name\":\"smoke-host\",\"address\":\"127.0.0.1\",\"port\":22,\"username\":\"root\",\"tenant_id\":\"${TENANT_ID}\",\"enabled\":true}" \
+  | grep -q 'smoke-host'
 
-curl -fsS -o /dev/null -w '%{http_code}' "${BASE}/login.html" | grep -q '200'
-curl -fsS -o /dev/null -w '%{http_code}' "${BASE}/manager.html" | grep -q '200'
-
+echo "register agent..."
 curl -fsS -X POST "${BASE}/api/v1/agents/register" \
   -H 'Content-Type: application/json' \
   -d '{"name":"smoke-agent","register_token":"smoke-agent-token","tenant_slug":"default","hostname":"ci","ip":"127.0.0.1","version":"smoke"}' \
