@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -14,6 +15,15 @@ type Config struct {
 	Auth     AuthConfig     `yaml:"auth"`
 	SSH      SSHConfig      `yaml:"ssh"`
 	Agent    AgentConfig    `yaml:"agent"`
+	Logging  LoggingConfig  `yaml:"logging"`
+}
+
+type LoggingConfig struct {
+	Path       string `yaml:"path"`
+	MaxSizeMB  int    `yaml:"max_size_mb"`
+	MaxBackups int    `yaml:"max_backups"`
+	MaxAgeDays int    `yaml:"max_age_days"`
+	Level      string `yaml:"level"`
 }
 
 type ServerConfig struct {
@@ -95,6 +105,13 @@ func Default() *Config {
 			RegisterToken: "agent-register-token",
 			HeartbeatTTL:  Duration(60 * time.Second),
 		},
+		Logging: LoggingConfig{
+			Path:       "logs/ssh233.log",
+			MaxSizeMB:  10,
+			MaxBackups: 5,
+			MaxAgeDays: 30,
+			Level:      "info",
+		},
 	}
 }
 
@@ -125,6 +142,16 @@ func (c *Config) Save(path string) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0600)
+}
+
+func (c *Config) ResolveLogPath(configDir string) string {
+	if c.Logging.Path == "" {
+		return ""
+	}
+	if filepath.IsAbs(c.Logging.Path) {
+		return c.Logging.Path
+	}
+	return filepath.Join(configDir, c.Logging.Path)
 }
 
 func (c *DatabaseConfig) Dialect() string {

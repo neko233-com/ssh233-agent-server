@@ -1,152 +1,87 @@
 package main
 
 import (
-	"context"
-	"embed"
 	"flag"
-	"io/fs"
-	"log/slog"
-	"net/http"
+	"fmt"
 	"os"
-	"os/signal"
 	"strings"
-	"syscall"
-	"time"
 
-	"github.com/neko233/ssh233-agent-server/internal/agent"
-	"github.com/neko233/ssh233-agent-server/internal/api"
-	"github.com/neko233/ssh233-agent-server/internal/audit"
-	"github.com/neko233/ssh233-agent-server/internal/auth"
-	"github.com/neko233/ssh233-agent-server/internal/bastion"
-	"github.com/neko233/ssh233-agent-server/internal/config"
-	"github.com/neko233/ssh233-agent-server/internal/store"
 	"github.com/neko233/ssh233-agent-server/internal/version"
 )
 
-//go:embed all:static
-var staticFS embed.FS
-
 func main() {
-	configPath := flag.String("config", "config.yaml", "config file path")
-	showVersion := flag.Bool("version", false, "print version and exit")
-	flag.Parse()
+	if err := run(os.Args[1:]); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
+}
 
+func run(args []string) error {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return runServeCLI(args)
+	}
+	switch args[0] {
+	case "run", "serve":
+		return runServeCLI(args[1:])
+	case "start":
+		return runStart(args[1:])
+	case "stop":
+		return runStop(args[1:])
+	case "restart":
+		return runRestart(args[1:])
+	case "status":
+		return runStatus(args[1:])
+	case "enable-autostart":
+		return runEnableAutostart(args[1:])
+	case "disable-autostart":
+		return runDisableAutostart(args[1:])
+	case "autostart-status":
+		return runAutostartStatus(args[1:])
+	case "version":
+		fmt.Println("ssh233-server", version.Version, version.Commit, version.Date)
+		return nil
+	case "help", "-h", "--help":
+		printUsage()
+		return nil
+	default:
+		return fmt.Errorf("unknown command %q (try: ssh233-server help)", args[0])
+	}
+}
+
+func runServeCLI(args []string) error {
+	fs := flag.NewFlagSet("ssh233-server serve", flag.ContinueOnError)
+	fs.SetOutput(os.Stdout)
+	configPath := fs.String("config", "config.yaml", "config file path")
+	showVersion := fs.Bool("version", false, "print version and exit")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 	if *showVersion {
-		println("ssh233-server", version.Version, version.Commit, version.Date)
-		return
+		fmt.Println("ssh233-server", version.Version, version.Commit, version.Date)
+		return nil
 	}
-
-	cfg, err := config.Load(*configPath)
-	if err != nil {
-		slog.Error("load config", "error", err)
-		os.Exit(1)
-	}
-
-	st, err := store.Open(&cfg.Database)
-	if err != nil {
-		slog.Error("open database", "error", err)
-		os.Exit(1)
-	}
-	defer st.Close()
-
-	if err := st.Bootstrap(cfg.Auth.AdminUser, cfg.Auth.AdminPassword); err != nil {
-		slog.Error("bootstrap", "error", err)
-		os.Exit(1)
-	}
-
-	auditLog := audit.New(st)
-	authSvc := auth.NewService(&cfg.Auth, st)
-
-	bastionSrv, err := bastion.New(cfg, st, auditLog)
-	if err != nil {
-		slog.Error("init bastion", "error", err)
-		os.Exit(1)
-	}
-
-	agentMgr := agent.NewManager(cfg, st, auditLog)
-	stop := make(chan struct{})
-	go agentMgr.StartStaleChecker(stop)
-
-	apiSrv := api.New(st, authSvc, bastionSrv, agentMgr, auditLog)
-	apiHandler := apiSrv.Router()
-	staticHandler := staticFileServer()
-
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/health" {
-			apiHandler.ServeHTTP(w, r)
-			return
-		}
-		staticHandler.ServeHTTP(w, r)
-	})
-
-	httpServer := &http.Server{
-		Addr:         cfg.Server.HTTPAddr,
-		Handler:      handler,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 0,
-	}
-
-	go func() {
-		slog.Info("HTTP server listening", "addr", cfg.Server.HTTPAddr)
-		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("http server", "error", err)
-			os.Exit(1)
-		}
-	}()
-
-	go func() {
-		if err := bastionSrv.ListenAndServe(); err != nil {
-			slog.Error("ssh bastion", "error", err)
-			os.Exit(1)
-		}
-	}()
-
-	slog.Info("SSH233 Agent Server started",
-		"http", cfg.Server.HTTPAddr,
-		"ssh", cfg.Server.SSHAddr,
-		"db", cfg.Database.Driver,
-		"admin", cfg.Auth.AdminUser,
-	)
-
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-	<-sig
-
-	close(stop)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	_ = httpServer.Shutdown(ctx)
+	return runServe(*configPath)
 }
 
-func staticFileServer() http.Handler {
-	sub, err := fs.Sub(staticFS, "static")
-	if err != nil {
-		panic(err)
-	}
-	fileServer := http.FileServer(http.FS(sub))
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
-		if path == "/" {
-			http.Redirect(w, r, "/login.html", http.StatusFound)
-			return
-		}
-		if path == "/manager" || path == "/manager/" {
-			http.Redirect(w, r, "/manager.html", http.StatusFound)
-			return
-		}
-		if !fileExists(sub, path) {
-			http.NotFound(w, r)
-			return
-		}
-		fileServer.ServeHTTP(w, r)
-	})
-}
+func printUsage() {
+	fmt.Print(`SSH233 Agent Server
 
-func fileExists(fsys fs.FS, path string) bool {
-	path = strings.TrimPrefix(path, "/")
-	if path == "" {
-		return true
-	}
-	_, err := fs.Stat(fsys, path)
-	return err == nil
+Usage:
+  ssh233-server [serve] -config config.yaml   Run in foreground
+  ssh233-server start   -config config.yaml   Start in background
+  ssh233-server stop    -config config.yaml   Stop background server
+  ssh233-server restart -config config.yaml   Restart background server
+  ssh233-server status  -config config.yaml   Show running status
+
+Autostart (opt-in, disabled by default on install):
+  ssh233-server enable-autostart  -config config.yaml
+  ssh233-server disable-autostart -config config.yaml
+  ssh233-server autostart-status  -config config.yaml
+
+Other:
+  ssh233-server version
+  ssh233-server help
+
+Web UI: http://127.0.0.1:6030/login.html
+`)
 }

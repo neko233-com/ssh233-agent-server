@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -487,6 +488,85 @@ func (s *Store) ListAuditLogs(scope Scope, limit, offset int) ([]models.AuditLog
 		logs = append(logs, l)
 	}
 	return logs, nil
+}
+
+type AuditStats struct {
+	Total   int64      `json:"total"`
+	Oldest  *time.Time `json:"oldest,omitempty"`
+	Newest  *time.Time `json:"newest,omitempty"`
+}
+
+func (s *Store) AuditStats(scope Scope) (AuditStats, error) {
+	where, args := scope.tenantFilter("tenant_id")
+	var stats AuditStats
+	row := s.db.QueryRow(`SELECT COUNT(*), MIN(created_at), MAX(created_at) FROM audit_logs WHERE `+where, args...)
+	var oldestAny, newestAny any
+	if err := row.Scan(&stats.Total, &oldestAny, &newestAny); err != nil {
+		return stats, err
+	}
+	if t, ok := coerceDBTime(oldestAny); ok {
+		stats.Oldest = &t
+	}
+	if t, ok := coerceDBTime(newestAny); ok {
+		stats.Newest = &t
+	}
+	return stats, nil
+}
+
+func coerceDBTime(v any) (time.Time, bool) {
+	switch x := v.(type) {
+	case time.Time:
+		return x, true
+	case string:
+		t, err := parseDBTime(x)
+		return t, err == nil
+	case []byte:
+		t, err := parseDBTime(string(x))
+		return t, err == nil
+	case float64:
+		return time.Unix(int64(x), 0), true
+	case int64:
+		return time.Unix(x, 0), true
+	case nil:
+		return time.Time{}, false
+	default:
+		t, err := parseDBTime(fmt.Sprint(x))
+		return t, err == nil
+	}
+}
+
+func parseDBTime(raw string) (time.Time, error) {
+	layouts := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05.999999999Z07:00",
+		"2006-01-02 15:04:05",
+	}
+	for _, layout := range layouts {
+		if t, err := time.Parse(layout, raw); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("parse db time %q", raw)
+}
+
+func (s *Store) DeleteAuditBefore(scope Scope, before time.Time) (int64, error) {
+	where, args := scope.tenantFilter("tenant_id")
+	args = append(args, before)
+	res, err := s.db.Exec(`DELETE FROM audit_logs WHERE `+where+` AND created_at < ?`, args...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+func (s *Store) DeleteAllAudit(scope Scope) (int64, error) {
+	where, args := scope.tenantFilter("tenant_id")
+	res, err := s.db.Exec(`DELETE FROM audit_logs WHERE `+where, args...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 func (s *Store) RecordCommand(rec *models.CommandRecord) error {

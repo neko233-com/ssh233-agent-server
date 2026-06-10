@@ -80,6 +80,49 @@ func TestTenantsRootOnly(t *testing.T) {
 	}
 }
 
+func TestAuditStatsAndCleanupAPI(t *testing.T) {
+	st, router := newAPITest(t)
+	tenant, _ := st.GetTenantBySlug("default")
+	for i := 0; i < 3; i++ {
+		_ = st.WriteAudit(&models.AuditLog{
+			TenantID: tenant.ID, Username: "root", Action: "test", Detail: "x",
+		})
+	}
+
+	rootToken := loginToken(t, router, "root", "root", "")
+	rec := authRequest(t, router, http.MethodGet, "/api/v1/audit/stats", rootToken, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("stats: %d %s", rec.Code, rec.Body.String())
+	}
+	var stats store.AuditStats
+	if err := json.Unmarshal(rec.Body.Bytes(), &stats); err != nil {
+		t.Fatal(err)
+	}
+	if stats.Total < 3 {
+		t.Fatalf("expected at least 3 audit rows, got %d", stats.Total)
+	}
+
+	op := &models.User{TenantID: tenant.ID, Username: "op2", Role: "operator"}
+	_ = st.CreateUser(op, "pw")
+	opToken := loginToken(t, router, "op2", "pw", "default")
+	rec = authRequest(t, router, http.MethodDelete, "/api/v1/audit?all=true", opToken, nil)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("operator should not cleanup: %d", rec.Code)
+	}
+
+	rec = authRequest(t, router, http.MethodDelete, "/api/v1/audit?all=true", rootToken, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("cleanup: %d %s", rec.Code, rec.Body.String())
+	}
+	var result map[string]int64
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result["deleted"] < 1 {
+		t.Fatalf("expected deletions, got %+v", result)
+	}
+}
+
 func TestAgentRegister(t *testing.T) {
 	st, router := newAPITest(t)
 	tenant := &models.Tenant{Name: "A", Slug: "acme", Enabled: true}

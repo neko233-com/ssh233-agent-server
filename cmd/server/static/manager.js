@@ -10,6 +10,9 @@ document.getElementById('user-info').textContent =
 if (user.role === 'root') {
   document.querySelectorAll('.root-only').forEach(el => el.classList.remove('hidden'));
 }
+if (user.role === 'root' || user.role === 'admin') {
+  document.querySelectorAll('.admin-only').forEach(el => el.classList.remove('hidden'));
+}
 
 function showPage(name) {
   document.querySelectorAll('.page').forEach(p => p.classList.add('hidden'));
@@ -86,6 +89,40 @@ async function loadAudit() {
   document.getElementById('audit-table').innerHTML = rows.map(l => `
     <tr><td>${fmtTime(l.created_at)}</td><td>${l.username}</td><td>${l.action}</td><td>${l.detail}</td></tr>`).join('');
 }
+
+async function loadMaintenance() {
+  const stats = await api('/audit/stats');
+  document.getElementById('audit-total').textContent = stats.total ?? 0;
+  document.getElementById('audit-oldest').textContent = stats.oldest ? fmtTime(stats.oldest) : '-';
+  document.getElementById('audit-newest').textContent = stats.newest ? fmtTime(stats.newest) : '-';
+}
+
+function showCleanupResult(msg) {
+  const el = document.getElementById('cleanup-result');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+
+async function cleanupAudit(query) {
+  if (!confirm('确认执行清理？此操作不可撤销。')) return;
+  const res = await api('/audit?' + query, { method: 'DELETE' });
+  showCleanupResult(`已删除 ${res.deleted} 条审计记录`);
+  await loadMaintenance();
+  await loadAudit();
+}
+
+document.getElementById('cleanup-days-btn')?.addEventListener('click', () => {
+  const days = document.getElementById('cleanup-days').value;
+  if (!days || days < 1) return alert('请输入有效天数');
+  cleanupAudit('older_than_days=' + encodeURIComponent(days));
+});
+document.getElementById('cleanup-before-btn')?.addEventListener('click', () => {
+  const val = document.getElementById('cleanup-before').value;
+  if (!val) return alert('请选择日期');
+  cleanupAudit('before=' + encodeURIComponent(new Date(val).toISOString()));
+});
+document.getElementById('cleanup-all-btn')?.addEventListener('click', () => cleanupAudit('all=true'));
+document.getElementById('audit-refresh-btn')?.addEventListener('click', loadAudit);
 
 async function loadUsers() {
   const rows = await api('/users');
@@ -205,6 +242,7 @@ document.querySelectorAll('.nav-item').forEach(btn => {
     if (page === 'agents') loadAgents();
     if (page === 'sessions') loadSessions();
     if (page === 'audit') loadAudit();
+    if (page === 'maintenance') loadMaintenance();
     if (page === 'users') loadUsers();
     if (page === 'tenants') loadTenants();
     if (page === 'webssh') loadHosts();

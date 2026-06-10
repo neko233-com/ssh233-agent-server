@@ -59,3 +59,24 @@ func TestLoadMissingUsesDefault(t *testing.T) {
 		t.Fatal("expected defaults")
 	}
 }
+
+func TestResolveLogPath(t *testing.T) {
+	cfg := config.Default()
+	cfg.Logging.Path = "logs/app.log"
+	got := cfg.ResolveLogPath("/etc/ssh233")
+	if got != filepath.Join("/etc/ssh233", "logs/app.log") {
+		t.Fatalf("relative path: %s", got)
+	}
+	absLog := filepath.Join(t.TempDir(), "abs.log")
+	cfg.Logging.Path = absLog
+	if cfg.ResolveLogPath("/etc/ssh233") != absLog {
+		t.Fatal("absolute path should pass through")
+	}
+}
+
+func TestDefaultLogging(t *testing.T) {
+	cfg := config.Default()
+	if cfg.Logging.MaxSizeMB != 10 || cfg.Logging.MaxBackups != 5 {
+		t.Fatalf("logging defaults: %+v", cfg.Logging)
+	}
+}

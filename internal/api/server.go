@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
@@ -77,6 +78,8 @@ func (s *Server) Router() http.Handler {
 		r.Get("/sessions", s.listSessions)
 		r.Get("/sessions/active", s.activeSessions)
 		r.Get("/audit", s.listAudit)
+		r.With(s.auth.AdminMiddleware).Get("/audit/stats", s.auditStats)
+		r.With(s.auth.AdminMiddleware).Delete("/audit", s.cleanupAudit)
 
 		r.Post("/exec", s.execCommand)
 		r.Post("/hosts/{id}/exec", s.execOnHost)
@@ -309,6 +312,51 @@ func (s *Server) listAudit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, logs)
+}
+
+func (s *Server) auditStats(w http.ResponseWriter, r *http.Request) {
+	claims := auth.ClaimsFromContext(r.Context())
+	stats, err := s.store.AuditStats(claims.Scope())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, stats)
+}
+
+func (s *Server) cleanupAudit(w http.ResponseWriter, r *http.Request) {
+	claims := auth.ClaimsFromContext(r.Context())
+	q := r.URL.Query()
+	var deleted int64
+	var err error
+
+	if q.Get("all") == "true" || q.Get("all") == "1" {
+		deleted, err = s.store.DeleteAllAudit(claims.Scope())
+	} else if daysStr := q.Get("older_than_days"); daysStr != "" {
+		days, convErr := strconv.Atoi(daysStr)
+		if convErr != nil || days < 1 {
+			http.Error(w, `{"error":"invalid older_than_days"}`, http.StatusBadRequest)
+			return
+		}
+		before := time.Now().AddDate(0, 0, -days)
+		deleted, err = s.store.DeleteAuditBefore(claims.Scope(), before)
+	} else if beforeStr := q.Get("before"); beforeStr != "" {
+		before, parseErr := time.Parse(time.RFC3339, beforeStr)
+		if parseErr != nil {
+			http.Error(w, `{"error":"invalid before (use RFC3339)"}`, http.StatusBadRequest)
+			return
+		}
+		deleted, err = s.store.DeleteAuditBefore(claims.Scope(), before)
+	} else {
+		http.Error(w, `{"error":"specify older_than_days, before, or all=true"}`, http.StatusBadRequest)
+		return
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.audit.Log(claims.TenantID, "audit_cleanup", claims.Username, claims.UserID, "", "", fmt.Sprintf("deleted=%d", deleted), r.RemoteAddr)
+	writeJSON(w, map[string]any{"deleted": deleted})
 }
 
 func (s *Server) execCommand(w http.ResponseWriter, r *http.Request) {

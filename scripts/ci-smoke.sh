@@ -7,7 +7,7 @@ HTTP_PORT="${SSH233_SMOKE_HTTP_PORT:-6030}"
 SSH_PORT="${SSH233_SMOKE_SSH_PORT:-6022}"
 BASE="http://127.0.0.1:${HTTP_PORT}"
 
-mkdir -p "$DATA"
+mkdir -p "$DATA/logs"
 CONFIG="${DATA}/config.yaml"
 cat >"$CONFIG" <<YAML
 server:
@@ -27,13 +27,22 @@ ssh:
 agent:
   register_token: smoke-agent-token
   heartbeat_ttl: 60s
+logging:
+  path: ${DATA}/logs/smoke.log
+  max_size_mb: 1
+  max_backups: 2
+  level: info
 YAML
 
 cd "$ROOT"
 go build -o "${DATA}/ssh233-server" ./cmd/server
-"${DATA}/ssh233-server" -config "$CONFIG" &
-PID=$!
-trap 'kill "$PID" 2>/dev/null || true; wait "$PID" 2>/dev/null || true' EXIT
+BIN="${DATA}/ssh233-server"
+
+echo "daemon start/stop..."
+"$BIN" start -config "$CONFIG"
+trap "$BIN stop -config $CONFIG 2>/dev/null || true" EXIT
+"$BIN" status -config "$CONFIG" | grep -q 'status=running'
+"$BIN" autostart-status -config "$CONFIG" | grep -q 'autostart_enabled=false'
 
 echo "waiting for health..."
 ready=0
@@ -72,5 +81,18 @@ curl -fsS -X POST "${BASE}/api/v1/agents/register" \
   -H 'Content-Type: application/json' \
   -d '{"name":"smoke-agent","register_token":"smoke-agent-token","tenant_slug":"default","hostname":"ci","ip":"127.0.0.1","version":"smoke"}' \
   | grep -q '"token"'
+
+echo "audit stats..."
+STATS=$(curl -fsS -H "Authorization: Bearer ${TOKEN}" "${BASE}/api/v1/audit/stats")
+echo "$STATS" | grep -q '"total"'
+
+echo "audit cleanup dry-run (older_than_days)..."
+curl -fsS -H "Authorization: Bearer ${TOKEN}" -X DELETE "${BASE}/api/v1/audit?older_than_days=365" \
+  | grep -q '"deleted"'
+
+test -f "${DATA}/logs/smoke.log"
+
+echo "cli version..."
+"$BIN" version | grep -q 'ssh233-server'
 
 echo "ci-smoke: ok"

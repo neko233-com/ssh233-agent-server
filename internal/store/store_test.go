@@ -67,6 +67,43 @@ func TestCreateUserWithinTenant(t *testing.T) {
 	}
 }
 
+func TestAuditStatsAndCleanup(t *testing.T) {
+	st := newTestStore(t)
+	tenant := createTenant(t, st, "auditco", "auditco")
+	scope := store.Scope{TenantID: tenant.ID}
+
+	for i := 0; i < 5; i++ {
+		if err := st.WriteAudit(&models.AuditLog{
+			TenantID: tenant.ID, Username: "u", Action: "test", Detail: "d",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	stats, err := st.AuditStats(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Total != 5 {
+		t.Fatalf("total: %d", stats.Total)
+	}
+
+	deleted, err := st.DeleteAllAudit(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted != 5 {
+		t.Fatalf("deleted: %d", deleted)
+	}
+	stats, err = st.AuditStats(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Total != 0 {
+		t.Fatalf("expected empty after cleanup, got %d", stats.Total)
+	}
+}
+
 func TestHostKeyPairUpsert(t *testing.T) {
 	st := newTestStore(t)
 	tenant := createTenant(t, st, "t1", "t1")

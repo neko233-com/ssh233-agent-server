@@ -3,7 +3,7 @@
 # Usage:
 #   curl -fsSL .../install.sh | bash
 #   curl -fsSL .../install.sh | bash -s -- --from-source
-#   bash scripts/install.sh --version v1.0.0
+#   bash scripts/install.sh --version v0.1.0
 
 set -euo pipefail
 
@@ -11,6 +11,7 @@ REPO="${SSH233_REPO:-neko233-com/ssh233-agent-server}"
 BINARY="ssh233-server"
 VERSION="${SSH233_VERSION:-latest}"
 FROM_SOURCE=0
+NO_START=0
 INSTALL_DIR="${SSH233_INSTALL:-${HOME}/.local/share/ssh233}"
 CONFIG_DIR="${SSH233_CONFIG:-${HOME}/.config/ssh233}"
 
@@ -20,6 +21,7 @@ SSH233 Agent Server installer
 
 Options:
   --from-source     Build from local git checkout (must run inside repo)
+  --no-start        Install only, do not start background server
   --version VER     Release version (default: latest)
   --install-dir DIR Install directory (default: ~/.local/share/ssh233)
   --help            Show help
@@ -34,6 +36,7 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --from-source) FROM_SOURCE=1; shift ;;
+    --no-start) NO_START=1; shift ;;
     --version) VERSION="$2"; shift 2 ;;
     --install-dir) INSTALL_DIR="$2"; shift 2 ;;
     --help|-h) usage; exit 0 ;;
@@ -65,8 +68,9 @@ ARCH=$(detect_arch)
 EXT=""
 [[ "$OS" == windows ]] && EXT=".exe"
 TARGET="${INSTALL_DIR}/${BINARY}${EXT}"
+CONFIG_FILE="${CONFIG_DIR}/config.yaml"
 
-mkdir -p "$INSTALL_DIR" "$CONFIG_DIR/data"
+mkdir -p "$INSTALL_DIR" "$CONFIG_DIR/data" "$CONFIG_DIR/logs" "$CONFIG_DIR/runtime"
 
 if [[ "$FROM_SOURCE" -eq 1 ]]; then
   ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -90,11 +94,18 @@ else
   install -m 0755 "${TMP}/${BINARY}${EXT}" "$TARGET"
 fi
 
-if [[ ! -f "${CONFIG_DIR}/config.yaml" ]]; then
+if [[ ! -f "$CONFIG_FILE" ]]; then
   if [[ -f "$(dirname "$0")/../config.example.yaml" ]]; then
-    cp "$(dirname "$0")/../config.example.yaml" "${CONFIG_DIR}/config.yaml"
+    cp "$(dirname "$0")/../config.example.yaml" "$CONFIG_FILE"
+    sed -i.bak "s|path: data/ssh233.db|path: ${CONFIG_DIR}/data/ssh233.db|g" "$CONFIG_FILE" 2>/dev/null || \
+      sed -i '' "s|path: data/ssh233.db|path: ${CONFIG_DIR}/data/ssh233.db|g" "$CONFIG_FILE"
+    sed -i.bak "s|host_key_path: data/host_key|host_key_path: ${CONFIG_DIR}/data/host_key|g" "$CONFIG_FILE" 2>/dev/null || \
+      sed -i '' "s|host_key_path: data/host_key|host_key_path: ${CONFIG_DIR}/data/host_key|g" "$CONFIG_FILE"
+    sed -i.bak "s|path: logs/ssh233.log|path: ${CONFIG_DIR}/logs/ssh233.log|g" "$CONFIG_FILE" 2>/dev/null || \
+      sed -i '' "s|path: logs/ssh233.log|path: ${CONFIG_DIR}/logs/ssh233.log|g" "$CONFIG_FILE"
+    rm -f "${CONFIG_FILE}.bak"
   else
-    cat >"${CONFIG_DIR}/config.yaml" <<YAML
+    cat >"$CONFIG_FILE" <<YAML
 server:
   http_addr: ":6030"
   ssh_addr: ":2222"
@@ -112,20 +123,36 @@ ssh:
 agent:
   register_token: change-me
   heartbeat_ttl: 60s
+logging:
+  path: ${CONFIG_DIR}/logs/ssh233.log
+  max_size_mb: 10
+  max_backups: 5
+  max_age_days: 30
+  level: info
 YAML
   fi
 fi
 
+echo ""
+echo "Installed: ${TARGET}"
+echo "Config:    ${CONFIG_FILE}"
+
+if [[ "$NO_START" -eq 0 ]]; then
+  echo "Starting in background (autostart disabled by default)..."
+  "$TARGET" start -config "$CONFIG_FILE"
+fi
+
 cat <<EOF
 
-Installed: ${TARGET}
-Config:    ${CONFIG_DIR}/config.yaml
-
-Start:
-  ${TARGET} -config ${CONFIG_DIR}/config.yaml
+Commands:
+  Status:   ${TARGET} status -config ${CONFIG_FILE}
+  Stop:     ${TARGET} stop -config ${CONFIG_FILE}
+  Restart:  ${TARGET} restart -config ${CONFIG_FILE}
+  Autostart (opt-in): ${TARGET} enable-autostart -config ${CONFIG_FILE}
 
 Web UI:  http://127.0.0.1:6030/login.html
 Admin:   root / root
+Logs:    ${CONFIG_DIR}/logs/ssh233.log
 
 Add to PATH (optional):
   export PATH="${INSTALL_DIR}:\$PATH"

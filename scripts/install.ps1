@@ -2,10 +2,12 @@
 # Usage:
 #   iwr -useb .../install.ps1 | iex
 #   .\scripts\install.ps1 -FromSource
+#   .\scripts\install.ps1 -Version v0.1.0
 
 param(
     [string]$Version = "latest",
     [switch]$FromSource,
+    [switch]$NoStart,
     [string]$InstallDir = "$env:LOCALAPPDATA\ssh233",
     [string]$ConfigDir = "$env:APPDATA\ssh233"
 )
@@ -22,7 +24,7 @@ function Get-LatestVersion {
 }
 
 $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "amd64" }
-New-Item -ItemType Directory -Force -Path $InstallDir, "$ConfigDir\data" | Out-Null
+New-Item -ItemType Directory -Force -Path $InstallDir, "$ConfigDir\data", "$ConfigDir\logs", "$ConfigDir\runtime" | Out-Null
 $Target = Join-Path $InstallDir "$Binary.exe"
 
 if ($FromSource) {
@@ -53,6 +55,11 @@ if (-not (Test-Path $ConfigFile)) {
     $Example = Join-Path (Split-Path $PSScriptRoot -Parent) "config.example.yaml"
     if (Test-Path $Example) {
         Copy-Item $Example $ConfigFile
+        (Get-Content $ConfigFile -Raw) `
+            -replace 'path: data/ssh233.db', "path: $ConfigDir/data/ssh233.db" `
+            -replace 'host_key_path: data/host_key', "host_key_path: $ConfigDir/data/host_key" `
+            -replace 'path: logs/ssh233.log', "path: $ConfigDir/logs/ssh233.log" |
+            Set-Content $ConfigFile -Encoding UTF8
     } else {
         @"
 server:
@@ -72,6 +79,12 @@ ssh:
 agent:
   register_token: change-me
   heartbeat_ttl: 60s
+logging:
+  path: $ConfigDir/logs/ssh233.log
+  max_size_mb: 10
+  max_backups: 5
+  max_age_days: 30
+  level: info
 "@ | Set-Content $ConfigFile -Encoding UTF8
     }
 }
@@ -79,7 +92,19 @@ agent:
 Write-Host ""
 Write-Host "Installed: $Target"
 Write-Host "Config:    $ConfigFile"
-Write-Host "Start:     & '$Target' -config '$ConfigFile'"
+
+if (-not $NoStart) {
+    Write-Host "Starting in background (autostart disabled by default)..."
+    & $Target start -config $ConfigFile
+}
+
+Write-Host ""
+Write-Host "Commands:"
+Write-Host "  Status:   & '$Target' status -config '$ConfigFile'"
+Write-Host "  Stop:     & '$Target' stop -config '$ConfigFile'"
+Write-Host "  Restart:  & '$Target' restart -config '$ConfigFile'"
+Write-Host "  Autostart (opt-in): & '$Target' enable-autostart -config '$ConfigFile'"
+Write-Host ""
 Write-Host "Web UI:    http://127.0.0.1:6030/login.html"
 Write-Host "Admin:     root / root"
-Write-Host "PATH:      $InstallDir"
+Write-Host "Logs:      $ConfigDir\logs\ssh233.log"
