@@ -40,7 +40,10 @@ BIN="${DATA}/ssh233-server"
 
 echo "daemon start/stop..."
 "$BIN" start -config "$CONFIG"
-trap "$BIN stop -config $CONFIG 2>/dev/null || true" EXIT
+cleanup() {
+  "$BIN" stop -config "$CONFIG" 2>/dev/null || true
+}
+trap cleanup EXIT
 "$BIN" status -config "$CONFIG" | grep -q 'status=running'
 "$BIN" autostart-status -config "$CONFIG" | grep -q 'autostart_enabled=false'
 
