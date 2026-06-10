@@ -96,7 +96,9 @@ jobs:
           cache: true
 
       - name: Run integration smoke
-        run: bash scripts/ci-smoke.sh
+        run: |
+          chmod +x scripts/ci-smoke.sh
+          bash scripts/ci-smoke.sh
 
   scripts:
     name: validate scripts

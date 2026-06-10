@@ -36,10 +36,13 @@ PID=$!
 trap 'kill "$PID" 2>/dev/null || true; wait "$PID" 2>/dev/null || true' EXIT
 
 for _ in $(seq 1 60); do
-  curl -fsS "${BASE}/health" | grep -q '"status":"ok"' && break
+  if curl -fsS "${BASE}/health" 2>/dev/null | grep -q '"status":"ok"'; then
+    break
+  fi
   sleep 0.25
 done
 curl -fsS "${BASE}/health" | grep -q '"status":"ok"'
+sleep 0.5
 
 TOKEN=$(curl -fsS -X POST "${BASE}/api/v1/auth/login" \
   -H 'Content-Type: application/json' \
