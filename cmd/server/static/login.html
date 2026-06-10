@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>登录 · SSH233</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body class="login-body">
+  <div class="login-card">
+    <div class="brand-large">
+      <span class="logo">⚡</span>
+      <h1>SSH233 Agent Server</h1>
+    </div>
+    <p class="subtitle">统一跳板机 · 多租户 · Web SSH · Agent 集群</p>
+    <form id="login-form">
+      <label>租户</label>
+      <input type="text" id="tenant-slug" placeholder="default（root 可留空）" autocomplete="organization">
+      <label>用户名</label>
+      <input type="text" id="login-user" placeholder="root" required autocomplete="username">
+      <label>密码</label>
+      <input type="password" id="login-pass" placeholder="root" required autocomplete="current-password">
+      <button type="submit" class="btn-primary btn-block">登录</button>
+    </form>
+    <p id="login-error" class="error"></p>
+    <p class="hint">超级管理员: root / root · 租户用户需填写租户 slug</p>
+  </div>
+  <script src="/common.js"></script>
+  <script src="/login.js"></script>
+</body>
+</html>

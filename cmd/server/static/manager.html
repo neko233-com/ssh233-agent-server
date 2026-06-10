@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>管理控制台 · SSH233</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div id="app">
+    <aside class="sidebar">
+      <div class="brand"><span class="logo">⚡</span><span>SSH233</span></div>
+      <nav>
+        <button class="nav-item active" data-page="dashboard">仪表盘</button>
+        <button class="nav-item" data-page="hosts">主机管理</button>
+        <button class="nav-item" data-page="webssh">Web SSH</button>
+        <button class="nav-item" data-page="agents">Agent 集群</button>
+        <button class="nav-item" data-page="sessions">会话记录</button>
+        <button class="nav-item" data-page="audit">审计日志</button>
+        <button class="nav-item" data-page="users">用户管理</button>
+        <button class="nav-item root-only hidden" data-page="tenants">租户管理</button>
+      </nav>
+      <div class="sidebar-footer">
+        <div id="user-info"></div>
+        <button id="logout-btn">退出</button>
+      </div>
+    </aside>
+    <main class="content">
+      <section id="dashboard-page" class="page">
+        <h2>仪表盘</h2>
+        <div class="stats-grid">
+          <div class="stat-card"><span class="stat-num" id="stat-hosts">0</span><span class="stat-label">主机</span></div>
+          <div class="stat-card"><span class="stat-num" id="stat-agents">0</span><span class="stat-label">在线 Agent</span></div>
+          <div class="stat-card"><span class="stat-num" id="stat-sessions">0</span><span class="stat-label">活跃会话</span></div>
+          <div class="stat-card"><span class="stat-num" id="stat-audit">0</span><span class="stat-label">今日审计</span></div>
+        </div>
+      </section>
+      <section id="hosts-page" class="page hidden">
+        <div class="page-header"><h2>主机管理</h2><button id="add-host-btn" class="btn-primary">添加主机</button></div>
+        <table class="data-table"><thead><tr><th>名称</th><th>地址</th><th>端口</th><th>用户</th><th>租户</th><th>状态</th><th>操作</th></tr></thead><tbody id="hosts-table"></tbody></table>
+      </section>
+      <section id="webssh-page" class="page hidden">
+        <div class="page-header">
+          <h2>Web SSH</h2>
+          <div class="webssh-controls">
+            <select id="webssh-host"></select>
+            <input type="password" id="webssh-pass" placeholder="目标密码（首次）">
+            <button id="webssh-connect" class="btn-primary">连接</button>
+            <button id="webssh-disconnect" class="btn-secondary">断开</button>
+          </div>
+        </div>
+        <div id="terminal"></div>
+      </section>
+      <section id="agents-page" class="page hidden">
+        <h2>Agent 集群</h2>
+        <table class="data-table"><thead><tr><th>名称</th><th>租户</th><th>IP</th><th>状态</th><th>最后心跳</th></tr></thead><tbody id="agents-table"></tbody></table>
+        <div class="info-box"><h3>接入说明</h3><pre id="agent-doc"></pre></div>
+      </section>
+      <section id="sessions-page" class="page hidden">
+        <h2>会话记录</h2>
+        <table class="data-table"><thead><tr><th>用户</th><th>主机</th><th>协议</th><th>状态</th><th>开始</th></tr></thead><tbody id="sessions-table"></tbody></table>
+      </section>
+      <section id="audit-page" class="page hidden">
+        <h2>审计日志</h2>
+        <table class="data-table"><thead><tr><th>时间</th><th>用户</th><th>动作</th><th>详情</th></tr></thead><tbody id="audit-table"></tbody></table>
+      </section>
+      <section id="users-page" class="page hidden">
+        <div class="page-header"><h2>用户管理</h2><button id="add-user-btn" class="btn-primary">添加用户</button></div>
+        <table class="data-table"><thead><tr><th>用户名</th><th>角色</th><th>租户</th><th>状态</th></tr></thead><tbody id="users-table"></tbody></table>
+      </section>
+      <section id="tenants-page" class="page hidden">
+        <div class="page-header"><h2>租户管理</h2><button id="add-tenant-btn" class="btn-primary">添加租户</button></div>
+        <table class="data-table"><thead><tr><th>名称</th><th>Slug</th><th>状态</th><th>创建时间</th></tr></thead><tbody id="tenants-table"></tbody></table>
+      </section>
+    </main>
+  </div>
+  <dialog id="modal">
+    <form id="modal-form" method="dialog">
+      <h3 id="modal-title"></h3>
+      <div id="modal-body"></div>
+      <div class="modal-actions">
+        <button type="submit" class="btn-primary">保存</button>
+        <button type="button" id="modal-cancel" class="btn-secondary">取消</button>
+      </div>
+    </form>
+  </dialog>
+  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+  <script src="/common.js"></script>
+  <script src="/manager.js"></script>
+</body>
+</html>

@@ -1,0 +1,25 @@
+server:
+  http_addr: ":6030"
+  ssh_addr: ":2222"
+
+database:
+  driver: sqlite          # sqlite | mysql
+  sqlite:
+    path: data/ssh233.db
+  mysql:
+    dsn: "user:password@tcp(127.0.0.1:3306)/ssh233?parseTime=true&charset=utf8mb4"
+
+auth:
+  jwt_secret: change-me-to-a-random-secret
+  token_ttl: 24h
+  admin_user: root
+  admin_password: root
+
+ssh:
+  host_key_path: data/host_key
+  banner: |
+    SSH233 Agent Server - Authorized access only
+
+agent:
+  register_token: your-agent-register-token
+  heartbeat_ttl: 60s
